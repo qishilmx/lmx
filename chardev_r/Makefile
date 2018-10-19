@@ -3,7 +3,7 @@
 # @Email:  qlcx@tom.com
 # @Filename: Makefile
 # @Last modified by:   qlc
-# @Last modified time: 2018-10-19T17:14:41+08:00
+# @Last modified time: 2018-10-19T22:41:17+08:00
 # @License: GPL
 TAGET=chardev_r
 TM=debug
@@ -19,5 +19,6 @@ clean:
 	make -C  $(KERN_PATH) M=$(PWD) clean
 debug:
 	$(CROSS_COMPILE)gcc $(TM).c -o $(TM)
+	cp $(TM) /rootfs
 debug_clean:
 	rm -rf $(TM)

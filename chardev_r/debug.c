@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: debug.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-19T17:15:44+08:00
+ * @Last modified time: 2018-10-19T22:45:28+08:00
  * @License: GPL
  */
 #include <fcntl.h>
@@ -44,6 +44,7 @@ int main(void) {
   printf("ret=%d\n", ret);
 
   ret = ioctl(fd, GET_VALUE, &value_G);
+  printf("%d:%d\n", value_G.show_num, value_G.show_size);
   printf("ret=%d\n", ret);
 
   close(fd);
