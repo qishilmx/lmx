@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: atoi.h
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-20T19:27:05+08:00
+ * @Last modified time: 2018-10-20T20:48:38+08:00
  * @License: GPL
  */
 #ifndef __MY_ATOI_H_
