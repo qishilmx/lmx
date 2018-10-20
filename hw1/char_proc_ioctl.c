@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: char_proc_ioctl.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-20T09:32:53+08:00
+ * @Last modified time: 2018-10-20T19:41:04+08:00
  * @License: GPL
  */
 #include "stack_r.h"
@@ -14,7 +14,10 @@
 #include <linux/init.h>
 #include <linux/ioctl.h>
 #include <linux/module.h>
+//#include <linux/proc_fs.h>
+#include "atoi.h"
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 
 #define PERR(fmt, args...)                                                     \
@@ -29,6 +32,8 @@ static unsigned int SIZE_VALUE = 512;
 
 /*定义一个栈指针*/
 STACK_R *stacks;
+/*定义一个栈指针*/
+STACK_R *proc_stacks_r;
 
 /*定义字符设备相关结构体*/
 typedef struct {
@@ -38,6 +43,103 @@ typedef struct {
   struct class *chardev_r_class;
   struct device *chardev_r_device;
 } CHAR_DEV_R;
+
+#if 1
+/*proc相关操作*/
+
+/*proc操作函数*/
+int open_r(struct inode *inode, struct file *file) { return 0; }
+int release_r(struct inode *inode, struct file *file) { return 0; }
+ssize_t read_r(struct file *file, char __user *ubuf, size_t size, loff_t *pos) {
+  return stack_pop(proc_stacks_r, ubuf, size);
+}
+ssize_t write_r(struct file *file, const char __user *ubuf, size_t size,
+                loff_t *pos) {
+  /*写操作*/
+  int ret = 0, str = 0, sret = 0;
+  char *set_clean = "set clear stack";
+  char *set_sta_size = "set stack size";
+  char *show_sta_da = "show stack data";
+  char buf[128] = {'\0'};
+  STACK_R *stacks_bck = NULL;
+
+  ret = stack_push(proc_stacks_r, ubuf, size);
+  /*进行字符判断并进行相关操作*/
+  if (ret > strlen(set_clean)) {
+    str = strncmp(set_clean, proc_stacks_r->S_DATA, strlen(set_clean));
+    if (str == 0) {
+      stacks->S_D_TOP = 0;
+      stacks->S_D_NUM = 0;
+    }
+    str = strncmp(set_sta_size, proc_stacks_r->S_DATA, strlen(set_sta_size));
+    if (str == 0) {
+      /*设置大小*/
+      ret = my_atoi(proc_stacks_r->S_DATA);
+      PERR("ret = %d\n", ret);
+      if (ret > 0) {
+        stacks_bck = stack_create(ret);
+        if (IS_ERR_OR_NULL(stacks_bck))
+          goto stack_bck_create_err;
+        if (ret < stacks->S_D_NUM) {
+          stacks_bck->S_D_TOP = ret;
+          stacks_bck->S_D_NUM = ret;
+          strncpy(stacks_bck->S_DATA, stacks->S_DATA, ret);
+        } else {
+          stacks_bck->S_D_TOP = stacks->S_D_TOP;
+          stacks_bck->S_D_NUM = stacks->S_D_NUM;
+          strncpy(stacks_bck->S_DATA, stacks->S_DATA, stacks->S_D_NUM);
+        }
+        stack_destroy(stacks);
+        stacks = stacks_bck;
+        stacks_bck = NULL;
+      }
+    }
+    str = strncmp(show_sta_da, proc_stacks_r->S_DATA, strlen(show_sta_da));
+    if (str == 0) {
+      /*设置显示数据*/
+      sret = snprintf(buf, sizeof(buf), "%d%s%d%s\n%s", stacks->S_D_NUM,
+                      ":MUN--", stacks->S_D_SIZE, ":EZIS", "ATAD--");
+      strncat(buf, stacks->S_DATA, stacks->S_D_NUM);
+      proc_stacks_r->S_D_TOP = strlen(buf);
+      proc_stacks_r->S_D_NUM = strlen(buf);
+      proc_stacks_r->S_D_SIZE = stacks->S_D_SIZE;
+      strncpy(proc_stacks_r->S_DATA, buf, strlen(buf));
+    }
+  }
+  return ret;
+stack_bck_create_err:
+  return 0;
+}
+
+/*定义一个proc文件结构体指针*/
+struct proc_dir_entry *proc_r;
+/*定义file_operations结构体,并初始化,在该结构体上面实现相应函数*/
+struct file_operations fops = {
+    .open = open_r, .release = release_r, .read = read_r, .write = write_r,
+};
+
+struct proc_dir_entry *proc_r_create(const char *name, umode_t mode,
+                                     struct proc_dir_entry *parent,
+                                     const struct file_operations *proc_fops,
+                                     void *data) {
+  proc_stacks_r = stack_create(128);
+  if (IS_ERR_OR_NULL(proc_stacks_r))
+    goto stack_create_proc_err;
+  proc_r = proc_create_data(name, mode, parent, proc_fops, data);
+  if (IS_ERR_OR_NULL(proc_r))
+    goto proc_create_data_err;
+  return proc_r;
+proc_create_data_err:
+  stack_destroy(proc_stacks_r);
+stack_create_proc_err:
+  return NULL;
+}
+
+void proc_r_remove(const char *name, struct proc_dir_entry *parent) {
+  remove_proc_entry(name, parent);
+}
+
+#endif
 
 /*定义ioctl相关结构体*/
 typedef struct {
@@ -73,7 +175,6 @@ long chardev_r_unlocked_ioctl(struct file *file, unsigned int cmd,
   CHAR_DEV_SET value_S;
   CHAR_DEV_GET value_G;
   STACK_R *stacks_bck = NULL;
-  int i = 0;
 
   switch (cmd) {
   case SET_VALUE:
@@ -90,23 +191,16 @@ long chardev_r_unlocked_ioctl(struct file *file, unsigned int cmd,
       if (value_S.set_size < stacks->S_D_NUM) {
         stacks_bck->S_D_TOP = value_S.set_size;
         stacks_bck->S_D_NUM = value_S.set_size;
-        for (i = 0; i < value_S.set_size; i++) {
-          stacks_bck->S_DATA[i] = stacks->S_DATA[i];
-        }
+        strncpy(stacks_bck->S_DATA, stacks->S_DATA, value_S.set_size);
       } else {
         stacks_bck->S_D_TOP = stacks->S_D_TOP;
         stacks_bck->S_D_NUM = stacks->S_D_NUM;
-        for (i = 0; i < stacks->S_D_NUM; i++) {
-          stacks_bck->S_DATA[i] = stacks->S_DATA[i];
-        }
+        strncpy(stacks_bck->S_DATA, stacks->S_DATA, stacks->S_D_NUM);
       }
-      PERR("%s:%s\n", stacks_bck->S_DATA, stacks->S_DATA);
       stack_destroy(stacks);
       stacks = stacks_bck;
       stacks_bck = NULL;
-      PERR("%s:\n%d:%d:%d\n", stacks->S_DATA, stacks->S_D_TOP, stacks->S_D_NUM,
-           stacks->S_D_SIZE);
-    } /*问题：数据拷贝有问题*/
+    }
     break;
   case GET_VALUE:
     value_G.show_num = stacks->S_D_NUM;
@@ -190,6 +284,11 @@ void chardev_r_destroy(CHAR_DEV_R *cdr) {
 /*----------------------------结束添加----------------------------*/
 static __init int char_proc_ioctl_init(void) {
   /*开始添加*/
+  /*proc*/
+  proc_r = proc_r_create("proc_r", 0644, NULL, &fops, NULL);
+  if (IS_ERR_OR_NULL(proc_r))
+    goto proc_r_create_err;
+
   stacks = stack_create(SIZE_VALUE);
   if (IS_ERR_OR_NULL(stacks))
     goto stack_create_err;
@@ -203,6 +302,8 @@ static __init int char_proc_ioctl_init(void) {
 chardev_r_create_err:
   stack_destroy(stacks);
 stack_create_err:
+  proc_r_remove("proc_r", NULL);
+proc_r_create_err:
   return -ENOMEM;
   /*结束添加*/
 }
@@ -210,6 +311,8 @@ stack_create_err:
 static __exit void char_proc_ioctl_exit(void) {
   /*开始添加*/
   chardev_r_destroy(chardev_r);
+  proc_r_remove("proc_r", NULL);
+  stack_destroy(proc_stacks_r);
   stack_destroy(stacks);
   /*结束添加*/
   PERR("EXIT\n");

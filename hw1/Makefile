@@ -3,12 +3,12 @@
 # @Email:  qlcx@tom.com
 # @Filename: Makefile
 # @Last modified by:   qlc
-# @Last modified time: 2018-10-19T23:04:10+08:00
+# @Last modified time: 2018-10-20T19:27:24+08:00
 # @License: GPL
 TAGET=debug_cpi
 TM=debug
 obj-m=$(TAGET).o
-$(TAGET)-objs=char_proc_ioctl.o stack_r.o
+$(TAGET)-objs=char_proc_ioctl.o stack_r.o atoi.o
 KERN_PATH=/opt/UEA_10_08/s5p6818sdk_lzy1/Linux/src/linux-3.4
 PWD=$(shell pwd)
 CROSS_COMPILE=/opt/UEA_10_08/s5p6818sdk_lzy1/Linux/src/buildroot/output/host/usr/bin/arm-cortex_a9-linux-gnueabi-
