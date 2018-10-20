@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: char_proc_ioctl.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-20T21:30:27+08:00
+ * @Last modified time: 2018-10-20T22:08:36+08:00
  * @License: GPL
  */
 #include "stack_r.h"
@@ -27,6 +27,7 @@
 
 MODULE_LICENSE("GPL");
 /*----------------------------开始添加----------------------------*/
+#define BUF_SIZE 128
 /*定义一个全局大小变量*/
 static unsigned int SIZE_VALUE = 512;
 
@@ -60,7 +61,7 @@ ssize_t write_r(struct file *file, const char __user *ubuf, size_t size,
   char *set_clean = "set clear stack";
   char *set_sta_size = "set stack size";
   char *show_sta_da = "show stack data";
-  char buf[128] = {'\0'};
+  char buf[BUF_SIZE] = {'\0'};
   STACK_R *stacks_bck = NULL;
 
   /*每次写之前清空一次*/
@@ -106,6 +107,7 @@ ssize_t write_r(struct file *file, const char __user *ubuf, size_t size,
       proc_stacks_r->S_D_TOP = strlen(buf);
       proc_stacks_r->S_D_NUM = strlen(buf);
       proc_stacks_r->S_D_SIZE = stacks->S_D_SIZE;
+      str_rts(buf);
       strncpy(proc_stacks_r->S_DATA, buf, strlen(buf));
     }
   }
@@ -125,7 +127,7 @@ struct proc_dir_entry *proc_r_create(const char *name, umode_t mode,
                                      struct proc_dir_entry *parent,
                                      const struct file_operations *proc_fops,
                                      void *data) {
-  proc_stacks_r = stack_create(128);
+  proc_stacks_r = stack_create(BUF_SIZE);
   if (IS_ERR_OR_NULL(proc_stacks_r))
     goto stack_create_proc_err;
   proc_r = proc_create_data(name, mode, parent, proc_fops, data);
@@ -169,7 +171,10 @@ ssize_t chardev_r_read(struct file *file, char __user *buffer, size_t size,
 }
 ssize_t chardev_r_write(struct file *file, const char __user *buffer,
                         size_t size, loff_t *pos) {
-  return stack_push(stacks, buffer, size);
+  int ret = 0;
+  ret = stack_push(stacks, buffer, size);
+  str_rts(stacks->S_DATA);
+  return ret;
 }
 long chardev_r_unlocked_ioctl(struct file *file, unsigned int cmd,
                               unsigned long data) {
