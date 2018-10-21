@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: chardev.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-21T15:13:12+08:00
+ * @Last modified time: 2018-10-21T17:00:53+08:00
  * @License: GPL
  */
 #include "atoi.h"
@@ -30,8 +30,6 @@ MODULE_LICENSE("GPL");
 /*----------------------------开始添加----------------------------*/
 
 #define ST_SIZE 512
-/*创建一个栈指针*/
-STACK_R *stacks;
 
 /*定义字符设备相关结构体*/
 typedef struct {
@@ -43,6 +41,94 @@ typedef struct {
   struct class *chardev_r_class;
   struct device *chardev_r_device;
 } CHAR_DEV_R;
+
+CHAR_DEV_R *save = NULL;
+/*创建一个栈指针*/
+STACK_R *stacks;
+/*定义一个proc文件结构体指针*/
+struct proc_dir_entry *proc_r;
+STACK_R *proc_stacks_r;
+
+int follow[5] = {0};
+
+/*proc操作函数*/
+int open_r(struct inode *inode, struct file *file) { return 0; }
+int release_r(struct inode *inode, struct file *file) { return 0; }
+ssize_t read_r(struct file *file, char __user *ubuf, size_t size, loff_t *pos) {
+  return stack_pop(proc_stacks_r, ubuf, size);
+}
+ssize_t write_r(struct file *file, const char __user *ubuf, size_t size,
+                loff_t *pos) {
+  int ret = 0, sret = 0;
+  CHAR_DEV_R *p = NULL;
+  LED_STATUS get_d = {0};
+  int led0 = 0, led1 = 0, led2 = 0, led3 = 0, buzzer = 0;
+  char *show_data_p = "show status";
+  char tmp[ST_SIZE] = {'\0'};
+
+  if (IS_ERR_OR_NULL(save))
+    return size;
+
+  p = save;
+
+  proc_stacks_r->S_D_TOP = 0;
+  proc_stacks_r->S_D_NUM = 0;
+  ret = stack_push(proc_stacks_r, ubuf, size);
+
+  sret = strncmp(show_data_p, proc_stacks_r->S_DATA, strlen(show_data_p));
+  PERR("sert:%d\n", sret);
+  if (!sret) {
+    led_get_status(p->led_value, &get_d.status);
+    if (get_d.status & (1 << 0))
+      led0 = 1;
+    else if (get_d.status & (1 << 1))
+      led1 = 1;
+    else if (get_d.status & (1 << 2))
+      led2 = 1;
+    else if (get_d.status & (1 << 3))
+      led3 = 1;
+    if (buzzer_on_or_off(p->buzzer_value))
+      buzzer = 1;
+    snprintf(tmp, sizeof(tmp), "\n%s%d--%s%d--%s%d--%s%d--%s%d\n", "led0:",
+             led0, "led1:", led1, "led2:", led2, "led3:", led3, "buzzer:",
+             buzzer);
+  }
+  PERR("tmp:%s\n", tmp);
+  proc_stacks_r->S_D_TOP = strlen(tmp);
+  proc_stacks_r->S_D_NUM = strlen(tmp);
+  str_rts(tmp);
+  PERR("tmp:%s\n", tmp);
+  strncpy(proc_stacks_r->S_DATA, tmp, strlen(tmp));
+  PERR("S_DATA:%s\n", proc_stacks_r->S_DATA);
+  return ret;
+}
+
+/*定义file_operations结构体,并初始化,在该结构体上面实现相应函数*/
+struct file_operations fops = {
+    .open = open_r, .release = release_r, .read = read_r, .write = write_r,
+};
+
+struct proc_dir_entry *proc_r_create(const char *name, umode_t mode,
+                                     struct proc_dir_entry *parent,
+                                     const struct file_operations *proc_fops,
+                                     void *data) {
+  struct proc_dir_entry *proc_c;
+  proc_stacks_r = stack_create(ST_SIZE);
+  if (IS_ERR_OR_NULL(proc_stacks_r))
+    goto stack_create_proc_err;
+  proc_c = proc_create_data(name, mode, parent, proc_fops, data);
+  if (IS_ERR_OR_NULL(proc_c))
+    goto proc_create_data_err;
+  return proc_c;
+proc_create_data_err:
+  stack_destroy(proc_stacks_r);
+stack_create_proc_err:
+  return NULL;
+}
+
+void proc_r_remove(const char *name, struct proc_dir_entry *parent) {
+  remove_proc_entry(name, parent);
+}
 
 /*定义ioctl相关结构体*/
 typedef struct {
@@ -57,6 +143,7 @@ int chardev_r_open(struct inode *inode, struct file *file) {
   /*保存不会被内核改变的数据*/
   CHAR_DEV_R *c = container_of(inode->i_cdev, CHAR_DEV_R, chardev_r_dev);
   file->private_data = c;
+  save = c;
   return 0;
 }
 int chardev_r_release(struct inode *inode, struct file *file) { return 0; }
@@ -93,11 +180,13 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
   if (!str) {
     num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
     led_on(c->led_value, num);
+    follow[num] = 1;
   }
   str = strncmp(set_led_off, stacks->S_DATA, strlen(set_led_off));
   if (!str) {
     num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
     led_off(c->led_value, num);
+    follow[num] = 0;
   }
   /*buzzer*/
   str = strncmp(set_buzzer_on, stacks->S_DATA, strlen(set_buzzer_on));
@@ -108,6 +197,17 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
   str = strncmp(set_buzzer_off, stacks->S_DATA, strlen(set_buzzer_off));
   if (!str) {
     num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
+    buzzer_off(c->buzzer_value);
+    follow[0] = 0;
+    follow[1] = 0;
+    follow[2] = 0;
+    follow[3] = 0;
+    follow[4] = 0;
+  }
+  if (follow[0] == 1 || follow[1] == 1 || follow[2] == 1 || follow[3] == 1 ||
+      follow[4] == 1) {
+    buzzer_on(c->buzzer_value);
+  } else {
     buzzer_off(c->buzzer_value);
   }
   /*显示状态,写命令到设备后，必须查看设备，中间不能进行其他操作，否则数据会被清空*/
@@ -131,7 +231,6 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
 
   stacks->S_D_TOP = strlen(tmp);
   stacks->S_D_NUM = strlen(tmp);
-  stacks->S_D_SIZE = stacks->S_D_SIZE;
   str_rts(tmp);
   strncpy(stacks->S_DATA, tmp, strlen(tmp));
   return ret;
@@ -139,7 +238,6 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
 long chardev_r_unlocked_ioctl(struct file *file, unsigned int cmd,
                               unsigned long data) {
   int ret = 0;
-  int follow[5] = {0};
   CHAR_DEV_R *c = file->private_data;
   LED_OR_BUZZER_SET or_set;
 
@@ -196,7 +294,7 @@ long chardev_r_unlocked_ioctl(struct file *file, unsigned int cmd,
         led_off(c->led_value, 1);
         led_off(c->led_value, 2);
         led_off(c->led_value, 3);
-        follow[5] = 0;
+        follow[4] = 0;
         break;
       }
     }
@@ -296,6 +394,9 @@ void chardev_r_destroy(CHAR_DEV_R *cdr) {
 /*----------------------------结束添加----------------------------*/
 static __init int Basics_init(void) {
   /*开始添加*/
+  proc_r = proc_r_create("proc_r", 0644, NULL, &fops, NULL);
+  if (IS_ERR_OR_NULL(proc_r))
+    goto proc_r_create_err;
   stacks = stack_create(ST_SIZE);
   if (IS_ERR_OR_NULL(stacks))
     goto stack_create_err;
@@ -309,14 +410,18 @@ static __init int Basics_init(void) {
 chardev_r_create_err:
   stack_destroy(stacks);
 stack_create_err:
+  proc_r_remove("proc_r", NULL);
+proc_r_create_err:
   return -ENOMEM;
   /*结束添加*/
 }
 
 static __exit void Basics_exit(void) {
-  /*开始添加*/
+  /*开始添�����*/
   chardev_r_destroy(chardev_r);
   stack_destroy(stacks);
+  proc_r_remove("proc_r", NULL);
+  stack_destroy(proc_stacks_r);
   /*结束添加*/
   PERR("EXIT\n");
   return;

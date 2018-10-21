@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: debug.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-21T15:21:07+08:00
+ * @Last modified time: 2018-10-21T16:42:00+08:00
  * @License: GPL
  */
 #include <fcntl.h>
@@ -37,7 +37,7 @@ int main(void) {
   }
   or_set.led_num_on = 1;
   or_set.led_num_off = 0;
-  or_set.buzzer_follow = 0;
+  or_set.buzzer_follow = 1;
 
   ret = ioctl(fd, SET_GET_VALUE, &or_set);
   printf("ret=%d\n", ret);
