@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: chardev.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-21T17:00:53+08:00
+ * @Last modified time: 2018-10-21T18:10:55+08:00
  * @License: GPL
  */
 #include "atoi.h"
@@ -14,12 +14,15 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/fs.h>
+#include <linux/gpio.h>
 #include <linux/init.h>
+#include <linux/interrupt.h>
 #include <linux/ioctl.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
+#include <mach/platform.h>
 
 #define PERR(fmt, args...)                                                     \
   do {                                                                         \
@@ -30,7 +33,7 @@ MODULE_LICENSE("GPL");
 /*----------------------------开始添加----------------------------*/
 
 #define ST_SIZE 512
-
+static int led_0 = 0, led_1 = 0, led_2 = 0, led_3 = 0;
 /*定义字符设备相关结构体*/
 typedef struct {
   void __iomem *led_value;
@@ -391,6 +394,93 @@ void chardev_r_destroy(CHAR_DEV_R *cdr) {
   kfree(cdr);
 }
 
+/*中断函数*/
+irqreturn_t key_1_irq_handler(int irq, void *dev) {
+  if (!led_0) {
+    led_on(chardev_r->led_value, 0);
+    led_0 = 1;
+    return IRQ_HANDLED;
+  } else {
+    led_off(chardev_r->led_value, 0);
+    led_0 = 0;
+  }
+  return IRQ_HANDLED;
+  /*
+   执行失败返回
+   return IRQ_NONE
+   */
+}
+irqreturn_t key_2_irq_handler(int irq, void *dev) {
+  if (!led_1) {
+    led_on(chardev_r->led_value, 1);
+    led_1 = 1;
+    return IRQ_HANDLED;
+  } else {
+    led_off(chardev_r->led_value, 1);
+    led_1 = 0;
+  }
+  return IRQ_HANDLED;
+}
+irqreturn_t key_3_irq_handler(int irq, void *dev) {
+  if (!led_2) {
+    led_on(chardev_r->led_value, 2);
+    led_2 = 1;
+    return IRQ_HANDLED;
+  } else {
+    led_off(chardev_r->led_value, 2);
+    led_2 = 0;
+  }
+  return IRQ_HANDLED;
+}
+irqreturn_t key_4_irq_handler(int irq, void *dev) {
+  if (!led_3) {
+    led_on(chardev_r->led_value, 3);
+    led_3 = 1;
+    return IRQ_HANDLED;
+  } else {
+    led_off(chardev_r->led_value, 3);
+    led_3 = 0;
+  }
+  return IRQ_HANDLED;
+}
+
+/*中断操作*/
+int interrupt_init_irq(void) {
+  int ret = 0;
+  ret = request_irq(gpio_to_irq(PAD_GPIO_A + 28), key_1_irq_handler,
+                    IRQF_TRIGGER_RISING, "key_1", NULL);
+  if (ret < 0)
+    goto key_1_request_irq_err;
+  ret = request_irq(gpio_to_irq(PAD_GPIO_B + 30), key_2_irq_handler,
+                    IRQF_TRIGGER_RISING, "key_2", NULL);
+  if (ret < 0)
+    goto key_2_request_irq_err;
+  ret = request_irq(gpio_to_irq(PAD_GPIO_B + 31), key_3_irq_handler,
+                    IRQF_TRIGGER_RISING, "key_3", NULL);
+  if (ret < 0)
+    goto key_3_request_irq_err;
+  ret = request_irq(gpio_to_irq(PAD_GPIO_B + 9), key_4_irq_handler,
+                    IRQF_TRIGGER_RISING, "key_4", NULL);
+  if (ret < 0)
+    goto key_4_request_irq_err;
+  return 0;
+key_4_request_irq_err:
+  free_irq(IRQ_GPIO_B_START + 31, NULL);
+key_3_request_irq_err:
+  free_irq(IRQ_GPIO_B_START + 30, NULL);
+key_2_request_irq_err:
+  free_irq(IRQ_GPIO_A_START + 28, NULL);
+key_1_request_irq_err:
+  return ret;
+}
+
+void interrupt_exit_irq(void) {
+  free_irq(IRQ_GPIO_B_START + 9, NULL);
+  free_irq(IRQ_GPIO_B_START + 31, NULL);
+  free_irq(IRQ_GPIO_B_START + 30, NULL);
+  free_irq(IRQ_GPIO_A_START + 28, NULL);
+}
+
 /*----------------------------结束添加----------------------------*/
 static __init int Basics_init(void) {
   /*开始添加*/
@@ -403,10 +493,14 @@ static __init int Basics_init(void) {
   chardev_r = chardev_r_create();
   if (IS_ERR_OR_NULL(chardev_r))
     goto chardev_r_create_err;
+  if (interrupt_init_irq())
+    goto interrupt_init_irq_err;
   /*暂停添加*/
   PERR("INIT\n");
   return 0;
 /*继续添加*/
+interrupt_init_irq_err:
+  chardev_r_destroy(chardev_r);
 chardev_r_create_err:
   stack_destroy(stacks);
 stack_create_err:
@@ -417,7 +511,8 @@ proc_r_create_err:
 }
 
 static __exit void Basics_exit(void) {
-  /*开始添�����*/
+  /*开始添加*/
+  interrupt_exit_irq();
   chardev_r_destroy(chardev_r);
   stack_destroy(stacks);
   proc_r_remove("proc_r", NULL);
