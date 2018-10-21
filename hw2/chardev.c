@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: chardev.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-21T14:44:19+08:00
+ * @Last modified time: 2018-10-21T15:13:12+08:00
  * @License: GPL
  */
 #include "atoi.h"
@@ -46,15 +46,12 @@ typedef struct {
 
 /*定义ioctl相关结构体*/
 typedef struct {
-  unsigned int set_size;
-  int set_clear;
-} CHAR_DEV_SET;
-typedef struct {
-  int show_num;
-  int show_size;
-} CHAR_DEV_GET;
-#define SET_VALUE _IOW('L', 1, CHAR_DEV_SET *)
-#define GET_VALUE _IOR('L', 2, CHAR_DEV_GET *)
+  unsigned int led_num_on;  /*1,2,3,4对应相应的led灯，5为全部打开*/
+  unsigned int led_num_off; /*1,2,3,4对应相应的led灯，5为全部关闭*/
+  unsigned int buzzer_follow; /*1为跟随0为不跟随*/
+} LED_OR_BUZZER_SET;
+#define SET_GET_VALUE _IOWR('L', 1, LED_OR_BUZZER_SET *)
+
 /*定义相应操作函数*/
 int chardev_r_open(struct inode *inode, struct file *file) {
   /*保存不会被内核改变的数据*/
@@ -142,22 +139,75 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
 long chardev_r_unlocked_ioctl(struct file *file, unsigned int cmd,
                               unsigned long data) {
   int ret = 0;
-  // CHAR_DEV_R *c = file->private_data; /*暂时未使用*/
-  CHAR_DEV_SET value_S;
-  CHAR_DEV_GET value_G;
+  int follow[5] = {0};
+  CHAR_DEV_R *c = file->private_data;
+  LED_OR_BUZZER_SET or_set;
 
   switch (cmd) {
-  case SET_VALUE:
-    ret = copy_from_user(&value_S, (void *)data, sizeof(value_S));
-    PERR("value_S.set_size=%d,value_S.set_clear=%d\n", value_S.set_size,
-         value_S.set_clear);
-    break;
-  case GET_VALUE:
-    value_G.show_num = 100;
-    value_G.show_size = 512;
-    ret = copy_to_user((void *)data, &value_G, sizeof(value_G));
-    PERR("value_G.show_num=%d,value_G.show_size=%d\n", value_G.show_num,
-         value_G.show_size);
+  case SET_GET_VALUE:
+    ret = copy_from_user(&or_set, (void *)data, sizeof(or_set));
+    if (or_set.led_num_on) {
+      switch (or_set.led_num_on) {
+      case 1:
+        led_on(c->led_value, 0);
+        follow[0] = 1;
+        break;
+      case 2:
+        led_on(c->led_value, 1);
+        follow[1] = 1;
+        break;
+      case 3:
+        led_on(c->led_value, 2);
+        follow[2] = 1;
+        break;
+      case 4:
+        led_on(c->led_value, 3);
+        follow[3] = 1;
+        break;
+      case 5:
+        led_on(c->led_value, 0);
+        led_on(c->led_value, 1);
+        led_on(c->led_value, 2);
+        led_on(c->led_value, 3);
+        follow[4] = 1;
+        break;
+      }
+    }
+    if (or_set.led_num_off) {
+      switch (or_set.led_num_off) {
+      case 1:
+        led_off(c->led_value, 0);
+        follow[0] = 0;
+        break;
+      case 2:
+        led_off(c->led_value, 1);
+        follow[1] = 0;
+        break;
+      case 3:
+        led_off(c->led_value, 2);
+        follow[2] = 0;
+        break;
+      case 4:
+        led_off(c->led_value, 3);
+        follow[3] = 0;
+        break;
+      case 5:
+        led_off(c->led_value, 0);
+        led_off(c->led_value, 1);
+        led_off(c->led_value, 2);
+        led_off(c->led_value, 3);
+        follow[5] = 0;
+        break;
+      }
+    }
+    if (or_set.buzzer_follow) {
+      if (follow[0] == 1 || follow[1] == 1 || follow[2] == 1 ||
+          follow[3] == 1 || follow[4] == 1) {
+        buzzer_on(c->buzzer_value);
+      } else {
+        buzzer_off(c->buzzer_value);
+      }
+    }
     break;
   }
 
