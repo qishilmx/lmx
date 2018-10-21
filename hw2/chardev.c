@@ -4,10 +4,11 @@
  * @Email:  qlcx@tom.com
  * @Filename: chardev.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-21T13:52:44+08:00
+ * @Last modified time: 2018-10-21T14:39:39+08:00
  * @License: GPL
  */
 #include "atoi.h"
+#include "buzzer.h"
 #include "led.h"
 #include "stack_r.h"
 #include <linux/cdev.h>
@@ -34,7 +35,8 @@ STACK_R *stacks;
 
 /*定义字符设备相关结构体*/
 typedef struct {
-  void __iomem *chardev_r_value;
+  void __iomem *led_value;
+  void __iomem *buzzer_value;
   dev_t chardev_r_num;
   struct cdev chardev_r_dev;
   struct file_operations chardev_r_ops;
@@ -75,10 +77,12 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
   /*定义命令字符串*/
   char *set_led_on = "set led on";
   char *set_led_off = "set led off";
-  char *show_led_status = "show led status";
+  char *show_status = "show status";
+  char *set_buzzer_on = "set buzzer on";
+  char *set_buzzer_off = "set buzzer off";
 
   int ret = 0, str = 0, num = 0;
-  int led0 = 0, led1 = 0, led2 = 0, led3 = 0;
+  int led0 = 0, led1 = 0, led2 = 0, led3 = 0, buzzer = 0;
   char tmp[ST_SIZE] = {'\0'};
   LED_STATUS get_d = {0};
 
@@ -87,30 +91,46 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
   stacks->S_D_NUM = 0;
   ret = stack_push(stacks, buffer, size);
   /*判断命令行*/
+  /*led*/
   str = strncmp(set_led_on, stacks->S_DATA, strlen(set_led_on));
   if (!str) {
     num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
-    led_on(c->chardev_r_value, num);
+    led_on(c->led_value, num);
   }
   str = strncmp(set_led_off, stacks->S_DATA, strlen(set_led_off));
   if (!str) {
     num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
-    led_off(c->chardev_r_value, num);
+    led_off(c->led_value, num);
   }
-  str = strncmp(show_led_status, stacks->S_DATA, strlen(show_led_status));
+  /*buzzer*/
+  str = strncmp(set_buzzer_on, stacks->S_DATA, strlen(set_buzzer_on));
   if (!str) {
-    led_get_status(c->chardev_r_value, &get_d.status);
+    num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
+    buzzer_on(c->buzzer_value);
+  }
+  str = strncmp(set_buzzer_off, stacks->S_DATA, strlen(set_buzzer_off));
+  if (!str) {
+    num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
+    buzzer_off(c->buzzer_value);
+  }
+  str = strncmp(show_status, stacks->S_DATA, strlen(show_status));
+  if (!str) {
+    led_get_status(c->led_value, &get_d.status);
     if (get_d.status & (1 << 0))
       led0 = 1;
     else if (get_d.status & (1 << 1))
       led1 = 1;
     else if (get_d.status & (1 << 2))
-      led2 = 0;
+      led2 = 1;
     else if (get_d.status & (1 << 3))
-      led3 = 0;
-    snprintf(tmp, sizeof(tmp), "%s%d--%s%d--%s%d--%s%d\n", "led0:", led0,
-             "led1:", led1, "led2:", led2, "led3:", led3);
+      led3 = 1;
+    if (buzzer_on_or_off(c->buzzer_value))
+      buzzer = 1;
+    snprintf(tmp, sizeof(tmp), "\n%s%d--%s%d--%s%d--%s%d--%s%d\n", "led0:",
+             led0, "led1:", led1, "led2:", led2, "led3:", led3, "buzzer:",
+             buzzer);
   }
+
   stacks->S_D_TOP = strlen(tmp);
   stacks->S_D_NUM = strlen(tmp);
   stacks->S_D_SIZE = stacks->S_D_SIZE;
@@ -152,9 +172,12 @@ CHAR_DEV_R *chardev_r_create(void) {
   cdr = kzalloc(sizeof(*cdr), GFP_KERNEL);
   if (IS_ERR_OR_NULL(cdr))
     goto kzalloc_err;
-  cdr->chardev_r_value = led_init(); /*需要修改*/
-  if (IS_ERR_OR_NULL(cdr->chardev_r_value))
+  cdr->led_value = led_init(); /*需要修改*/
+  if (IS_ERR_OR_NULL(cdr->led_value))
     goto led_init_err;
+  cdr->buzzer_value = buzzer_init(); /*需要修改*/
+  if (IS_ERR_OR_NULL(cdr->buzzer_value))
+    goto buzzer_init_err;
   /*      申请设备号并注册    */
   ret = alloc_chrdev_region(&cdr->chardev_r_num, 0, 1, "chardev_r");
   if (ret) {
@@ -200,7 +223,9 @@ chardev_r_class_create_err:
 cdev_add_chardev_r_device_err:
   unregister_chrdev_region(cdr->chardev_r_num, 1);
 alloc_chardev_r_chrdev_region_err:
-  led_exit(cdr->chardev_r_value);
+  buzzer_exit(cdr->buzzer_value);
+buzzer_init_err:
+  led_exit(cdr->led_value);
 led_init_err: /*需要修改*/
   kfree(cdr);
 kzalloc_err:
@@ -212,7 +237,8 @@ void chardev_r_destroy(CHAR_DEV_R *cdr) {
   class_destroy(cdr->chardev_r_class);
   cdev_del(&cdr->chardev_r_dev);
   unregister_chrdev_region(cdr->chardev_r_num, 1);
-  led_exit(cdr->chardev_r_value); /*需要修改*/
+  buzzer_exit(cdr->buzzer_value);
+  led_exit(cdr->led_value); /*需要修改*/
   kfree(cdr);
 }
 
