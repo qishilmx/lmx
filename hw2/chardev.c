@@ -4,7 +4,7 @@
  * @Email:  qlcx@tom.com
  * @Filename: chardev.c
  * @Last modified by:   qlc
- * @Last modified time: 2018-10-21T14:39:39+08:00
+ * @Last modified time: 2018-10-21T14:44:19+08:00
  * @License: GPL
  */
 #include "atoi.h"
@@ -113,6 +113,7 @@ ssize_t chardev_r_write(struct file *file, const char __user *buffer,
     num = my_atoi(stacks->S_DATA, stacks->S_D_NUM);
     buzzer_off(c->buzzer_value);
   }
+  /*显示状态,写命令到设备后，必须查看设备，中间不能进行其他操作，否则数据会被清空*/
   str = strncmp(show_status, stacks->S_DATA, strlen(show_status));
   if (!str) {
     led_get_status(c->led_value, &get_d.status);
